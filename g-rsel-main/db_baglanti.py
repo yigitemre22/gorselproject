@@ -1,32 +1,23 @@
 # -*- coding: utf-8 -*-
-# MySQL Veritabanı Bağlantı Modülü
+# SQLite Veritabanı Bağlantı Modülü
 
-import mysql.connector
-from mysql.connector import Error
+import sqlite3
+import os
 
-# ── Bağlantı Ayarları ────────────────────────────────────────────────────────
-DB_CONFIG = {
-    "host":     "localhost",   # Sunucu adresi
-    "port":     3306,          # Port (varsayılan: 3306)
-    "user":     "root",            # Kullanıcı adı
-    "password": "1234",            # Şifre
-    "database": "spor_salonu",            # Veritabanı adı
-    "charset":  "utf8mb4",
-    "use_pure": True,              # PyQt5 DLL çakışmalarını (SSL) önlemek için saf Python kullan
-}
+# ── Veritabanı Dosyası ───────────────────────────────────────────────────────
+DB_PATH = os.path.join(os.path.dirname(__file__), "gorsel.db")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def baglan():
     """
-    MySQL'e bağlanır ve bağlantı nesnesini döndürür.
+    SQLite'a bağlanır ve bağlantı nesnesini döndürür.
     Hata durumunda None döner.
     """
     try:
-        baglanti = mysql.connector.connect(**DB_CONFIG)
-        if baglanti.is_connected():
-            return baglanti
-    except Error as e:
+        baglanti = sqlite3.connect(DB_PATH)
+        return baglanti
+    except sqlite3.Error as e:
         print(f"[DB HATA] Bağlantı kurulamadı: {e}")
         return None
 
@@ -38,9 +29,9 @@ def baglanti_kapat(baglanti, cursor=None):
     try:
         if cursor:
             cursor.close()
-        if baglanti and baglanti.is_connected():
+        if baglanti:
             baglanti.close()
-    except Error as e:
+    except sqlite3.Error as e:
         print(f"[DB HATA] Kapatma hatası: {e}")
 
 
@@ -50,47 +41,46 @@ def baglanti_test():
     """
     baglanti = baglan()
     if baglanti:
-        print(f"[DB OK] '{DB_CONFIG['database']}' veritabanına başarıyla bağlanıldı.")
+        print("[DB OK] 'gorsel.db' veritabanına başarıyla bağlanıldı.")
         baglanti_kapat(baglanti)
     else:
-        print("[DB HATA] Bağlantı başarısız. Ayarları kontrol edin.")
+        print("[DB HATA] Bağlantı başarısız.")
 
 
 def sorgu_calistir(sorgu, parametreler=None):
     """
-    Veritabanında SELECT, INSERT, UPDATE, DELETE sorgularını çalıştırır.
-    SELECT sorgularında veriyi liste olarak döner.
-    Diğer sorgularda etkilenen satır sayısını döner.
+    SELECT / INSERT / UPDATE / DELETE sorgularını çalıştırır.
+    SELECT → veri döner
+    diğerleri → etkilenen satır sayısı
     """
     baglanti = baglan()
     if not baglanti:
         return None
-    
+
     cursor = None
     sonuc = None
+
     try:
-        # dictionary=False kalsın ki tuple (veri listesi) dönsün, senin tablolarınla uyumlu olsun
-        cursor = baglanti.cursor(dictionary=False) 
-        
+        cursor = baglanti.cursor()
+
         if parametreler:
             cursor.execute(sorgu, parametreler)
         else:
             cursor.execute(sorgu)
-            
-        # Eğer sorgu bir SELECT sorgusu ise verileri çek
-        if cursor.description:
+
+        # SELECT kontrolü
+        if sorgu.strip().lower().startswith("select"):
             sonuc = cursor.fetchall()
         else:
-            # INSERT, UPDATE, DELETE ise değişiklikleri kaydet
             baglanti.commit()
-            sonuc = cursor.rowcount # Etkilenen satır sayısı
-            
-    except Error as e:
-        print(f"[DB SORGUN HATASI]: {e}")
-        if baglanti:
-            baglanti.rollback() # Hata durumunda işlemi geri al
+            sonuc = cursor.rowcount
+
+    except sqlite3.Error as e:
+        print(f"[DB SORGU HATASI]: {e}")
+        baglanti.rollback()
         sonuc = None
+
     finally:
         baglanti_kapat(baglanti, cursor)
-        
+
     return sonuc

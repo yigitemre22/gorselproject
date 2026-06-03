@@ -243,35 +243,51 @@ class LoginWindow(QWidget):
             return
 
         cursor = None
+
         try:
-            cursor = baglanti.cursor(dictionary=True)
+            cursor = baglanti.cursor()
+
+            # 👑 ADMIN LOGIN (SQLite uyumlu)
             if role == "Admin":
-                cursor.execute(
-                    "SELECT kullanici_id, ad, soyad, rol FROM kullanicilar "
-                    "WHERE email=%s AND sifre=%s AND rol='admin' AND aktif=TRUE",
-                    (username, password)
-                )
+                cursor.execute("""
+                    SELECT kullanici_id, ad, soyad, rol
+                    FROM kullanicilar
+                    WHERE email = ?
+                    AND sifre = ?
+                    AND rol = 'admin'
+                    AND aktif = 1
+                """, (username, password))
+
                 kullanici = cursor.fetchone()
+
                 if kullanici:
                     self.panel = AdminPanel(kullanici)
                     self.panel.show()
                     self.hide()
                 else:
                     QMessageBox.warning(self, "Hata", "E-posta veya şifre hatalı.")
+
+            # 🏋 ANTRENÖR LOGIN (SQLite FIX)
             else:
-                cursor.execute(
-                    "SELECT antrenor_id, ad, soyad FROM antrenorler WHERE email=%s AND sifre=%s",
-                    (username, password)
-                )
+                cursor.execute("""
+                    SELECT antrenor_id, ad, soyad
+                    FROM antrenorler
+                    WHERE email = ?
+                    AND sifre = ?
+                """, (username, password))
+
                 antrenor = cursor.fetchone()
+
                 if antrenor:
                     self.panel = AntrenorPanel(antrenor)
                     self.panel.show()
                     self.hide()
                 else:
                     QMessageBox.warning(self, "Hata", "E-posta veya şifre hatalı.")
+
         except Exception:
             QMessageBox.critical(self, "Veritabanı Hatası", traceback.format_exc())
+
         finally:
             db_baglanti.baglanti_kapat(baglanti, cursor)
 

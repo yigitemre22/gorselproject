@@ -125,13 +125,15 @@ class DersForm(QDialog):
         self.style().drawPrimitive(QStyle.PE_Widget, opt, p, self)
 
     def _antrenorleri_yukle(self):
-        rows = sorgu_calistir("SELECT antrenor_id, CONCAT(ad, ' ', soyad) FROM antrenorler")
+        # SQLite'ta string birleştirme işlemi || operatörü ile yapılır
+        rows = sorgu_calistir("SELECT antrenor_id, ad || ' ' || soyad FROM antrenorler")
         if rows and isinstance(rows, list):
             for r in rows:
                 self.antrenor_combo.addItem(str(r[1]), r[0])
 
     def _bilgileri_getir(self):
-        res = sorgu_calistir("SELECT ders_adi, antrenor_id, ders_saati, kapasite, salon FROM dersler WHERE ders_id=%s", (self.ders_id,))
+        # %s yerine ? kullanıldı
+        res = sorgu_calistir("SELECT ders_adi, antrenor_id, ders_saati, kapasite, salon FROM dersler WHERE ders_id=?", (self.ders_id,))
         if res and isinstance(res, list):
             v = res[0]
             self.ders_adi_input.setText(str(v[0]))
@@ -142,9 +144,24 @@ class DersForm(QDialog):
             self.salon_input.setText(str(v[4]))
 
     def _kaydet(self):
-        veriler = (self.ders_adi_input.text(), self.antrenor_combo.currentData(), self.ders_saati_input.text(), self.kapasite_input.text(), self.salon_input.text())
+        veriler = (
+            self.ders_adi_input.text(), 
+            self.antrenor_combo.currentData(), 
+            self.ders_saati_input.text(), 
+            self.kapasite_input.text(), 
+            self.salon_input.text()
+        )
+        
         if self.ders_id:
-            sorgu_calistir("UPDATE dersler SET ders_adi=%s, antrenor_id=%s, ders_saati=%s, kapasite=%s, salon=%s WHERE ders_id=%s", veriler + (self.ders_id,))
+            # GÜNCELLEME: %s yerine ? kullanıldı
+            sorgu_calistir(
+                "UPDATE dersler SET ders_adi=?, antrenor_id=?, ders_saati=?, kapasite=?, salon=? WHERE ders_id=?", 
+                veriler + (self.ders_id,)
+            )
         else:
-            sorgu_calistir("INSERT INTO dersler (ders_adi, antrenor_id, ders_saati, kapasite, salon) VALUES (%s, %s, %s, %s, %s)", veriler)
+            # EKLEME: %s yerine ? kullanıldı
+            sorgu_calistir(
+                "INSERT INTO dersler (ders_adi, antrenor_id, ders_saati, kapasite, salon) VALUES (?, ?, ?, ?, ?)", 
+                veriler
+            )
         self.accept()

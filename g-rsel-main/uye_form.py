@@ -19,30 +19,31 @@ class UyeForm(QDialog):
         super().__init__(parent)
         self.uye_id = uye_id
         
-        # 1. Beyaz Klasik Windows Çerçevesini ve Başlığını Kaldırıyoruz
+        # 1. Stil ve çerçeve ayarları
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        
-        self.setFixedSize(540, 620) # Başlık barı eklendiği için yüksekliği hafif artırdık
+        self.setFixedSize(540, 620)
         uygula_tema(self)
         self.setStyleSheet(self.styleSheet() + """
             QDialog { background-color: #0A0A22; border: 2px solid #6C63FF; border-radius: 12px; }
         """)
         
+        # 2. ÖNCE Arayüzü oluştur
         self.uyelik_tipleri = self._uyelik_tiplerini_getir()
         self._ui_olustur()
         
+        # 3. SONRA verileri doldur (İki metodu tek bir yerde birleştirmelisin)
+       
         if self.uye_id:
-            self._verileri_doldur()
-            
-        # İlk açılışta bitiş tarihini otomatik tetiklemesi için
+            self._verileri_getir()
+        # 4. İlk açılışta bitiş tarihini otomatik tetikle
         self.bitis_tarihi_hesapla()
 
     def _uyelik_tiplerini_getir(self):
         try:
             bag = db_baglanti.baglan()
             if not bag: return []
-            cur = bag.cursor(dictionary=True)
+            cur = bag.cursor()
             cur.execute("SELECT uyelik_tip_id, tip_adi, sure_ay FROM uyelik_tipleri")
             tipler = cur.fetchall()
             db_baglanti.baglanti_kapat(bag, cur)
@@ -148,7 +149,7 @@ class UyeForm(QDialog):
         self.uyelik_tip_input = QComboBox()
         self.uyelik_tip_input.setFixedHeight(36)
         for tip in self.uyelik_tipleri:
-            self.uyelik_tip_input.addItem(f"{tip['tip_adi']} ({tip['sure_ay']} Ay)", [tip['uyelik_tip_id'], tip['sure_ay']])
+            self.uyelik_tip_input.addItem(f"{tip[1]} ({tip[2]} Ay)", [tip[0], tip[2]])
         
         self.uyelik_tip_input.currentIndexChanged.connect(self.bitis_tarihi_hesapla)
         grid.addWidget(self.uyelik_tip_input, 5, 1, 1, 3)
@@ -220,7 +221,7 @@ class UyeForm(QDialog):
     def _verileri_doldur(self):
         try:
             bag = db_baglanti.baglan()
-            cur = bag.cursor(dictionary=True)
+            cur = bag.cursor()
             cur.execute("SELECT * FROM uyeler WHERE uye_id=%s", (self.uye_id,))
             uye = cur.fetchone()
             db_baglanti.baglanti_kapat(bag, cur)
@@ -246,7 +247,35 @@ class UyeForm(QDialog):
                 self.bitis_tarihi_hesapla()
         except Exception as e:
             QMessageBox.critical(self, "Hata", f"Üye bilgileri alınamadı: {e}")
-
+    def _verileri_getir(self):
+        if self.uye_id: # Eğer uye_id varsa düzenleme modundayız
+            try:
+                bag = db_baglanti.baglan()
+                cur = bag.cursor()
+                # uyeler tablosundaki tüm sütunları çekiyoruz
+                cur.execute("SELECT * FROM uyeler WHERE uye_id=?", (self.uye_id,))
+                uye = cur.fetchone()
+                
+                if uye:
+                    # uye[0] = id, uye[1] = ad, uye[2] = soyad vb.
+                    # Kendi tablonuzdaki sıra farklıysa buradaki indeksleri güncelleyin
+                    self.ad_input.setText(str(uye[1]))
+                    self.soyad_input.setText(str(uye[2]))
+                    self.tc_input.setText(str(uye[3]))
+                    self.tel_input.setText(str(uye[4]))
+                    self.email_input.setText(str(uye[5]))
+                    # Tarihleri QDate'e çevirip setDate yapıyoruz
+                    # self.dt_input.setDate(QDate.fromString(uye[6], "yyyy-MM-dd"))
+                    
+                    self.adres_input.setPlainText(str(uye[8]))
+                    
+                    # Cinsiyet gibi ComboBoxlar için:
+                    index = self.cinsiyet_input.findText(uye[7])
+                    if index != -1: self.cinsiyet_input.setCurrentIndex(index)
+                    
+                db_baglanti.baglanti_kapat(bag, cur)
+            except Exception as e:
+                print(f"Veri çekme hatası: {e}")
     def _kaydet(self):
         ad    = self.ad_input.text().strip()
         soyad = self.soyad_input.text().strip()
@@ -255,35 +284,12 @@ class UyeForm(QDialog):
         email = self.email_input.text().strip()
         adres = self.adres_input.toPlainText().strip()
 
-        # Eksik kontrolü (Adres ve E-posta zorunlu tutulmuyor)
+        # Eksik kontrolü
         if not ad or not soyad or not tc or not tel:
-            QMessageBox.warning(self, "Eksik Bilgi", "Ad, Soyad, TC Kimlik ve Telefon alanları zorunludur.")
+            QMessageBox.warning(self, "Eksik Bilgi", "Ad, Soyad, TC ve Telefon alanları zorunludur.")
             return
 
-        # TC No 11 hane kontrolü
-        if len(tc) != 11:
-            QMessageBox.warning(self, "Hatalı TC", "TC Kimlik numarası tam olarak 11 haneli olmalıdır.")
-            return
-
-        # Telefon No en az 10-11 hane kontrolü
-        if len(tel) < 10:
-            QMessageBox.warning(self, "Hatalı Telefon", "Lütfen geçerli bir telefon numarası giriniz.")
-            return
-
-        # 6. REGEX İLE E-POSTA KONTROLÜ
-        if email: # Eğer e-posta girilmişse doğrula
-            email_regex = QRegExp(r"^[\w\.-]+@[\w\.-]+\.\w+$")
-            if not email_regex.exactMatch(email):
-                QMessageBox.warning(self, "Geçersiz E-posta", "Lütfen geçerli bir e-posta adresi giriniz.\nÖrn: ad@domain.com")
-                return
-        else:
-            email = "Belirtilmemiş"
-
-        # 4. ADRES OPSİYONEL KONTROLÜ
-        if not adres:
-            adres = "Adres Belirtilmemiş"
-
-        # ComboBox listesinden sadece saf 'uyelik_tip_id'yi süzüyoruz
+        # ComboBox verisi
         secili_data = self.uyelik_tip_input.currentData()
         uyelik_tip_id = secili_data[0] if secili_data else None
 
@@ -295,23 +301,28 @@ class UyeForm(QDialog):
         try:
             bag = db_baglanti.baglan()
             cur = bag.cursor()
+            
             if self.uye_id:
+                # GÜNCELLEME (UPDATE)
                 cur.execute("""
-                    UPDATE uyeler SET ad=%s,soyad=%s,tc_no=%s,telefon=%s,email=%s,
-                    dogum_tarihi=%s,cinsiyet=%s,adres=%s,uyelik_tip_id=%s,
-                    uyelik_baslangic=%s,uyelik_bitis=%s WHERE uye_id=%s
+                    UPDATE uyeler SET ad=?, soyad=?, tc_no=?, telefon=?, email=?,
+                    dogum_tarihi=?, cinsiyet=?, adres=?, uyelik_tip_id=?,
+                    uyelik_baslangic=?, uyelik_bitis=? WHERE uye_id=?
                 """, (ad, soyad, tc, tel, email, dt, cins, adres, uyelik_tip_id, baslangic, bitis, self.uye_id))
             else:
+                # EKLEME (INSERT) - 'durum' sütunu kaldırıldı
                 cur.execute("""
-                    INSERT INTO uyeler (ad,soyad,tc_no,telefon,email,dogum_tarihi,
-                    cinsiyet,adres,uyelik_tip_id,uyelik_baslangic,uyelik_bitis,durum)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'aktif')
+                    INSERT INTO uyeler (ad, soyad, tc_no, telefon, email, dogum_tarihi,
+                    cinsiyet, adres, uyelik_tip_id, uyelik_baslangic, uyelik_bitis)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (ad, soyad, tc, tel, email, dt, cins, adres, uyelik_tip_id, baslangic, bitis))
-            bag.commit()
-            db_baglanti.baglanti_kapat(bag, cur)
             
-            # Not: QMessageBox yerine ana ekranda ToastNotification çağrılacağı için 
-            # buradaki bilgi kutusunu sade bırakabilir veya silebilirsin.
+            bag.commit()
+            QMessageBox.information(self, "Başarılı", "İşlem başarıyla kaydedildi.")
             self.accept()
+            
         except Exception as e:
-            QMessageBox.critical(self, "Veritabanı Hatası", f"Kayıt başarısız:\n{e}")
+            QMessageBox.critical(self, "Veritabanı Hatası", f"Hata detayı: {e}")
+        finally:
+            if 'bag' in locals() and bag:
+                bag.close()

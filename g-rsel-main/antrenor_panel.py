@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# TitanFit Gym – Antrenör Paneli 
+# TitanFit Gym – Antrenör Paneli (SQLite Versiyonu)
 
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
@@ -71,25 +71,79 @@ def tabloyu_doldur(tablo, satirlar):
 
 
 def sorgu_calistir(sql, params=None):
+    """
+    SQLite için optimize edilmiş veritabanı sorgusu fonksiyonu
+    
+    Args:
+        sql: SQL sorgusu (SQLite format, ? parametreleri ile)
+        params: Tuple veya liste şeklinde parametreler
+    
+    Returns:
+        Sorgu sonucu tuple listesi
+    """
     try:
         bag = db_baglanti.baglan()
         if not bag:
             return []
         cur = bag.cursor()
-        cur.execute(sql, params or ())
+        
+        # SQLite ? parametreleri kullanır
+        if params:
+            cur.execute(sql, params)
+        else:
+            cur.execute(sql)
+        
         sonuc = cur.fetchall()
         db_baglanti.baglanti_kapat(bag, cur)
         return sonuc
     except Exception as e:
-        print(f"[DB] {e}")
+        print(f"[DB] Sorgu Hatası: {e}")
         return []
+
+
+def tuple_to_dict(antrenor_data, keys=None):
+    """
+    Veritabanından gelen tuple'ı dictionary'e çevir.
+    Eğer zaten dictionary ise olduğu gibi döndür.
+    
+    Args:
+        antrenor_data: tuple veya dict
+        keys: Sütun isimleri (isteğe bağlı)
+    
+    Returns:
+        Dictionary formatında antrenör verisi
+    """
+    if isinstance(antrenor_data, dict):
+        return antrenor_data
+    
+    if isinstance(antrenor_data, (list, tuple)):
+        # Veritabanındaki antrenorler tablosunun sütun sırası
+        # Bunu kendi tablosunun sütun sırasına göre değiştir
+        if keys is None:
+            keys = [
+                'antrenor_id',  # 0
+                'kullanici_adi', # 1
+                'sifre',         # 2
+                'ad',            # 3
+                'soyad',         # 4
+                'email',         # 5
+                'telefon',       # 6
+                'uzmanlik',      # 7
+                'durum',         # 8
+            ]
+        
+        return dict(zip(keys, antrenor_data))
+    
+    return {}
 
 
 class AntrenorPanel(QWidget):
     def __init__(self, antrenor):
         super().__init__()
-        self.antrenor = antrenor
-        self.antrenor_id = antrenor.get("antrenor_id")
+        
+        # ✅ Tuple'ı dictionary'e çevir
+        self.antrenor = tuple_to_dict(antrenor)
+        self.antrenor_id = self.antrenor.get("antrenor_id")
         self.aktif_btn = None
 
         self.setWindowFlags(Qt.FramelessWindowHint)
@@ -260,19 +314,13 @@ class AntrenorPanel(QWidget):
         sonuc = msg.exec_()
         if sonuc == QMessageBox.Yes:
             try:
-                # 1. Giriş ekranının olduğu python dosyasını buraya import et
-                # NOT: Dosya adın 'login.py' ve sınıfın 'GirisEkrani' ise ona göre düzenle:
                 from giris import LoginWindow 
                 
-                # 2. Yeni bir giriş ekranı nesnesi oluştur ve göster
                 self.giris_penceresi = LoginWindow()
                 self.giris_penceresi.show()
-                
-                # 3. Mevcut admin panelini Kapat (Uygulamayı değil, sadece bu pencereyi)
                 self.close()
                 
             except Exception as e:
-                # Eğer import veya sınıf adında hata yaparsan terminale yazması için:
                 print(f"Giriş ekranına dönerken hata oluştu: {e}")
 
     def _sayfa_widget(self, baslik):
@@ -297,9 +345,9 @@ class AntrenorPanel(QWidget):
         w, lay = self._sayfa_widget("📊  Dashboard")
 
         ders_say = sorgu_calistir(
-            "SELECT COUNT(*) FROM dersler WHERE antrenor_id=%s", (self.antrenor_id,))
+            "SELECT COUNT(*) FROM dersler WHERE antrenor_id = ?", (self.antrenor_id,))
         uye_say = sorgu_calistir(
-            "SELECT COUNT(*) FROM uye_Antrenor WHERE antrenor_id=%s", (self.antrenor_id,))
+            "SELECT COUNT(*) FROM uye_Antrenor WHERE antrenor_id = ?", (self.antrenor_id,))
         d = ders_say[0][0] if ders_say else 0
         u = uye_say[0][0] if uye_say else 0
 
@@ -316,71 +364,190 @@ class AntrenorPanel(QWidget):
 
         t = tablo_olustur(["Ders Adı","Saat","Kapasite","Salon"])
         rows = sorgu_calistir(
-            "SELECT ders_adi,ders_saati,kapasite,salon FROM dersler WHERE antrenor_id=%s",
+            "SELECT ders_adi, ders_saati, kapasite, salon FROM dersler WHERE antrenor_id = ?",
             (self.antrenor_id,))
         tabloyu_doldur(t, rows)
         lay.addWidget(t)
         return w
 
     # DERSLERİM
+    # DERSLERİM
+   # DERSLERİM
     def _derslerim(self):
         w, lay = self._sayfa_widget("📅  Derslerim")
-        t = tablo_olustur(["Ders ID","Ders Adı","Saat","Kapasite","Salon"])
-        rows = sorgu_calistir(
-            "SELECT ders_id,ders_adi,ders_saati,kapasite,salon FROM dersler WHERE antrenor_id=%s",
-            (self.antrenor_id,))
-        tabloyu_doldur(t, rows)
-        lay.addWidget(t)
+        
+        # --- DERSE ÜYE EKLE BUTONU ---
+        btn_ekle = QPushButton("➕ Derse Üye Ekle")
+        btn_ekle.setFixedWidth(160)
+        btn_ekle.setStyleSheet("""
+            QPushButton { 
+                background: #6C63FF; color: white; padding: 8px; 
+                border-radius: 5px; font-weight: bold; 
+            }
+            QPushButton:hover { background: #574dff; }
+        """)
+        # Butonun fonksiyonunu _derse_uye_ekle olarak bağlayın (bu fonksiyonun var olduğundan emin olun)
+        btn_ekle.clicked.connect(self._derse_uye_ekle)
+        lay.addWidget(btn_ekle)
 
-        kayitli_lbl = QLabel("👥  Derslerime Kayıtlı Üyeler")
-        kayitli_lbl.setStyleSheet("font-size:15px; font-weight:bold; color:#93C5FD; background:transparent; border:none; margin-top:8px;")
+        # 1. Dersler Tablosu
+        self.ders_tablo = tablo_olustur(["Ders ID","Ders Adı","Saat","Kapasite","Salon"])
+        rows = sorgu_calistir(
+            "SELECT ders_id, ders_adi, ders_saati, kapasite, salon FROM dersler WHERE antrenor_id = ?",
+            (self.antrenor_id,))
+        tabloyu_doldur(self.ders_tablo, rows)
+        lay.addWidget(self.ders_tablo)
+
+        # 2. Kayıtlı Üyeler Tablosu Başlığı
+        kayitli_lbl = QLabel("👥  Derslerime Kayıtlı Tüm Üyeler")
+        kayitli_lbl.setStyleSheet("font-size:15px; font-weight:bold; color:#93C5FD; margin-top:15px; background:transparent; border:none;")
         lay.addWidget(kayitli_lbl)
 
-        t2 = tablo_olustur(["Üye Adı","Üye Soyadı","Ders Adı","Kayıt Tarihi"])
+        # 3. Kayıtlı Üyeler Tablosu
+        self.kayitli_uyeler_tablo = tablo_olustur(["Üye Adı","Üye Soyadı","Ders Adı","Kayıt Tarihi"])
         rows2 = sorgu_calistir("""
             SELECT uy.ad, uy.soyad, d.ders_adi, ud.kayit_tarihi
             FROM uyeDers ud
-            JOIN uyeler uy ON ud.uye_id=uy.uye_id
-            JOIN dersler d  ON ud.ders_id=d.ders_id
-            WHERE d.antrenor_id=%s
+            JOIN uyeler uy ON ud.uye_id = uy.uye_id
+            JOIN dersler d ON ud.ders_id = d.ders_id
+            WHERE d.antrenor_id = ?
             ORDER BY ud.kayit_tarihi DESC
         """, (self.antrenor_id,))
-        tabloyu_doldur(t2, rows2)
-        lay.addWidget(t2)
+        tabloyu_doldur(self.kayitli_uyeler_tablo, rows2)
+        lay.addWidget(self.kayitli_uyeler_tablo)
+        
         return w
+
+    def _derse_uye_ekle(self):
+        sel = self.ders_tablo.selectedItems()
+        if not sel:
+            # Buraya hata mesajı fonksiyonunuzu ekleyebilirsiniz
+            return
+            
+        ders_id = self.ders_tablo.item(sel[0].row(), 0).text()
+        
+        from ders_uye_ekle_form import DersUyeEkleForm
+        # DÜZELTME: self.antrenor_id parametresini buraya ekledik
+        form = DersUyeEkleForm(ders_id, self.antrenor_id, parent=self)
+        
+        if form.exec_():
+            # 1. Kayıtlı üyeler tablosunu tekrar sorgula
+            rows2 = sorgu_calistir("""
+                SELECT uy.ad, uy.soyad, d.ders_adi, ud.kayit_tarihi
+                FROM uyeDers ud
+                JOIN uyeler uy ON ud.uye_id = uy.uye_id
+                JOIN dersler d ON ud.ders_id = d.ders_id
+                WHERE d.antrenor_id = ?
+                ORDER BY ud.kayit_tarihi DESC
+            """, (self.antrenor_id,))
+            
+            # 2. Mevcut tabloyu yeni verilerle doldur
+            tabloyu_doldur(self.kayitli_uyeler_tablo, rows2)
+    
+    def _dersler_yenile(self):
+        # Sorgu sonucunu al
+        rows = sorgu_calistir("""
+            SELECT ders_id, ders_adi, ders_saati, kapasite, salon 
+            FROM dersler 
+            WHERE antrenor_id = ?
+        """, (self.antrenor_id,))
+        
+        # rows None gelirse veya boş gelirse hata vermemesi için:
+        if rows is None:
+            rows = []
+            
+        # Eğer tablo tanımlıysa doldur
+        if hasattr(self, 'ders_tablo'):
+            tabloyu_doldur(self.ders_tablo, rows)
 
     # ÜYELERİM
     def _uyelerim(self):
         w, lay = self._sayfa_widget("👥  Üyelerim")
-        t = tablo_olustur(["Ad","Soyad","Telefon","E-posta","Üyelik Tipi","Bitiş","Durum"])
+        
+        # Üye ekleme butonu için aksiyon barı
+        from admin_panel import aksiyon_bar_olustur # Admin panelindeki fonksiyonu kullanıyoruz
+        lay.addWidget(aksiyon_bar_olustur([
+            ("➕  Yeni Üye Ekle", "btnBasari", self._uye_ekle_islemi),
+        ]))
+
+        self.uye_tablo = tablo_olustur(["Ad","Soyad","Telefon","E-posta","Üyelik Tipi","Bitiş","Durum"])
+        self._uyelerim_yenile() # Bu fonksiyonu aşağıda güncelleyeceğiz
+        lay.addWidget(self.uye_tablo)
+        return w
+
+    def _uyelerim_yenile(self):
         rows = sorgu_calistir("""
             SELECT uy.ad, uy.soyad, uy.telefon, uy.email,
                    ut.tip_adi, uy.uyelik_bitis, uy.durum
             FROM uye_Antrenor ua
-            JOIN uyeler uy ON ua.uye_id=uy.uye_id
-            LEFT JOIN uyelik_tipleri ut ON uy.uyelik_tip_id=ut.uyelik_tip_id
-            WHERE ua.antrenor_id=%s
+            JOIN uyeler uy ON ua.uye_id = uy.uye_id
+            LEFT JOIN uyelik_tipleri ut ON uy.uyelik_tip_id = ut.uyelik_tip_id
+            WHERE ua.antrenor_id = ?
         """, (self.antrenor_id,))
-        tabloyu_doldur(t, rows)
-        lay.addWidget(t)
-        return w
+        tabloyu_doldur(self.uye_tablo, rows)
+
+    def _uye_ekle_islemi(self):
+        from uye_secim_form import UyeSecimForm
+        form = UyeSecimForm(self.antrenor_id, parent=self)
+        if form.exec_():
+            # 1. Üyeler listesini yenile
+            self._uyelerim_yenile()
+            
+            # 2. Gelişim listesini de yenile (Eğer tablo oluşturulmuşsa)
+            if hasattr(self, 'gelisim_tablo'):
+                self._gelisim_yenile()
 
     # GELİŞİM TAKİBİ
+    # GELİŞİM TAKİBİ
     def _gelisim(self):
-        w, lay = self._sayfa_widget("📈  Üye Gelişim Takibi")
-        t = tablo_olustur(["Ad","Soyad","Kilo (kg)","Boy (cm)","Yağ Oranı (%)","Tarih"])
-        rows = sorgu_calistir("""
-            SELECT uy.ad, uy.soyad, g.kilo, g.boy, g.yag_orani, g.kayit_tarihi
-            FROM gelisim g
-            JOIN uyeler uy ON g.uye_id=uy.uye_id
-            JOIN uye_Antrenor ua ON uy.uye_id=ua.uye_id
-            WHERE ua.antrenor_id=%s
-            ORDER BY g.kayit_tarihi DESC
-        """, (self.antrenor_id,))
-        tabloyu_doldur(t, rows)
-        lay.addWidget(t)
+        w, lay = self._sayfa_widget("📈 Üye Gelişim Takibi")
+        
+        # 6 değil, 7 sütun tanımlıyoruz (İşlem sütunu dahil)
+        self.gelisim_tablo = tablo_olustur(["Ad", "Soyad", "Kilo", "Boy", "Yağ Oranı", "Tarih", "İşlem"])
+        lay.addWidget(self.gelisim_tablo)
+        
+        self._gelisim_yenile()
         return w
 
+    def _gelisim_yenile(self):
+        rows = sorgu_calistir("""
+                SELECT uy.ad, uy.soyad, g.kilo, g.boy, g.yag_orani, g.kayit_tarihi, g.gelisim_id
+                FROM uyeler uy 
+                LEFT JOIN gelisim g ON uy.uye_id = g.uye_id
+                JOIN uye_Antrenor ua ON uy.uye_id = ua.uye_id
+                WHERE ua.antrenor_id = ?
+                ORDER BY g.kayit_tarihi DESC
+            """, (self.antrenor_id,))
+        
+        if rows is None: rows = []
+            
+        self.gelisim_tablo.setRowCount(0)
+        for i, row in enumerate(rows):
+            self.gelisim_tablo.insertRow(i)
+            # İlk 6 veriyi (Ad, Soyad, Kilo, Boy, Yağ, Tarih) yaz
+            for j in range(6):
+                item = QTableWidgetItem(str(row[j]))
+                item.setTextAlignment(Qt.AlignCenter)
+                self.gelisim_tablo.setItem(i, j, item)
+            
+            # Güncelleme Butonunu Oluştur ve Ekle
+            btn_guncelle = QPushButton("Güncelle")
+            btn_guncelle.setStyleSheet("background: #4CAF50; color: white; border-radius: 4px; padding: 5px;")
+            # Tıklandığında o satırdaki gelişimi güncellemek için form aç
+            btn_guncelle.clicked.connect(lambda _, r=row: self._guncelleme_formunu_ac(r))
+            self.gelisim_tablo.setCellWidget(i, 6, btn_guncelle) # 6. sütun İşlem sütunudur
+       
+    def _guncelleme_formunu_ac(self, row_data):
+        # HATA BURADA: row_data[0] sadece ID idi, ama formun tüm satıra ihtiyacı var.
+        # uye_id = row_data[0]  <-- BU SATIRI SİLİN
+        
+        from gelisim_guncelle_form import GelisimGuncelleForm
+        # Tüm satırı (row_data) gönderiyoruz
+        form = GelisimGuncelleForm(row_data, parent=self)
+        
+        if form.exec_():
+            # Güncelleme sonrası tabloyu yenile
+            self._gelisim_yenile()
     # GİRİŞ / ÇIKIŞ
     def _giris_cikis(self):
         w, lay = self._sayfa_widget("🚪  Üye Giriş/Çıkış Kayıtları")
@@ -388,9 +555,9 @@ class AntrenorPanel(QWidget):
         rows = sorgu_calistir("""
             SELECT uy.ad, uy.soyad, gck.giris_saati, gck.cikis_saati
             FROM girisCikisKayitlari gck
-            JOIN uyeler uy ON gck.uye_id=uy.uye_id
-            JOIN uye_Antrenor ua ON uy.uye_id=ua.uye_id
-            WHERE ua.antrenor_id=%s
+            JOIN uyeler uy ON gck.uye_id = uy.uye_id
+            JOIN uye_Antrenor ua ON uy.uye_id = ua.uye_id
+            WHERE ua.antrenor_id = ?
             ORDER BY gck.giris_saati DESC
         """, (self.antrenor_id,))
         tabloyu_doldur(t, rows)

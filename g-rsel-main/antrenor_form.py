@@ -140,9 +140,13 @@ class AntrenorForm(QDialog):
         self.style().drawPrimitive(QStyle.PE_Widget, opt, p, self)
 
     def _bilgileri_getir(self):
-        res = sorgu_calistir("SELECT ad, soyad, uzmanlik, telefon, email, maas FROM antrenorler WHERE antrenor_id=%s", (self.antrenor_id,))
-        if res and isinstance(res, list):
-            veriler = res[0]
+        # Sorguda %s yerine ? kullanıldı
+        res = sorgu_calistir("SELECT ad, soyad, uzmanlik, telefon, email, maas FROM antrenorler WHERE antrenor_id=?", (self.antrenor_id,))
+        
+        # sorgu_calistir metodunuzun döndürdüğü yapıya göre (genellikle bir liste döner)
+        if res:
+            # Eğer res bir liste dönüyorsa ve ilk elemanı satırsa:
+            veriler = res[0] 
             self.ad_input.setText(str(veriler[0]))
             self.soyad_input.setText(str(veriler[1]))
             self.uzmanlik_input.setText(str(veriler[2]))
@@ -151,9 +155,27 @@ class AntrenorForm(QDialog):
             self.maas_input.setText(str(veriler[5]))
 
     def _kaydet(self):
-        veriler = (self.ad_input.text(), self.soyad_input.text(), self.uzmanlik_input.text(), self.tel_input.text(), self.email_input.text(), self.maas_input.text())
+        # 1. Verileri topla
+        veriler = (
+            self.ad_input.text(), 
+            self.soyad_input.text(), 
+            self.uzmanlik_input.text(), 
+            self.tel_input.text(), 
+            self.email_input.text(), 
+            self.maas_input.text()
+        )
+        
         if self.antrenor_id:
-            sorgu_calistir("UPDATE antrenorler SET ad=%s, soyad=%s, uzmanlik=%s, telefon=%s, email=%s, maas=%s WHERE antrenor_id=%s", veriler + (self.antrenor_id,))
+            # GÜNCELLEME: %s yerine ? kullanıldı
+            # Sıralamaya dikkat: veriler + id
+            sorgu_calistir(
+                "UPDATE antrenorler SET ad=?, soyad=?, uzmanlik=?, telefon=?, email=?, maas=? WHERE antrenor_id=?", 
+                veriler + (self.antrenor_id,)
+            )
         else:
-            sorgu_calistir("INSERT INTO antrenorler (ad, soyad, uzmanlik, telefon, email, maas) VALUES (%s, %s, %s, %s, %s, %s)", veriler)
+            # EKLEME: %s yerine ? kullanıldı
+            sorgu_calistir(
+                "INSERT INTO antrenorler (ad, soyad, uzmanlik, telefon, email, maas) VALUES (?, ?, ?, ?, ?, ?)", 
+                veriler
+            )
         self.accept()

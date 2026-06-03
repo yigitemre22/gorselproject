@@ -3,12 +3,11 @@
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QDateEdit, QMessageBox, QGridLayout, QFrame
+    QPushButton, QComboBox, QDateEdit, QMessageBox, QGridLayout
 )
 from PyQt5.QtCore import Qt, QDate
 from tema import uygula_tema
 import db_baglanti
-
 
 class GiderForm(QDialog):
     def __init__(self, parent=None):
@@ -121,8 +120,9 @@ class GiderForm(QDialog):
         try:
             bag = db_baglanti.baglan()
             cur = bag.cursor()
+            # SQLite uyumlu sorgu yapısı: %s yerine ? kullanıldı
             cur.execute(
-                "INSERT INTO giderler (gider_turu, tutar, gider_tarihi, aciklama) VALUES (%s,%s,%s,%s)",
+                "INSERT INTO giderler (gider_turu, tutar, gider_tarihi, aciklama) VALUES (?, ?, ?, ?)",
                 (tur, tutar, tarih, aciklama)
             )
             bag.commit()

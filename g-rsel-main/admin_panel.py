@@ -270,7 +270,7 @@ class AdminPanel(QWidget):
         gym_lbl = QLabel("TitanFit Gym")
         gym_lbl.setAlignment(Qt.AlignCenter)
         gym_lbl.setStyleSheet("font-size: 13px; font-weight: 800; color: #A78BFA; background: transparent; border: none; letter-spacing: 1px;")
-        user_lbl = QLabel(f"👤  {self.kullanici.get('ad','')} {self.kullanici.get('soyad','')}")
+        user_lbl = QLabel(f"👤  {self.kullanici[1]} {self.kullanici[2]}")
         user_lbl.setAlignment(Qt.AlignCenter)
         user_lbl.setStyleSheet("font-size: 11px; color: #555580; background: transparent; border: none;")
 
@@ -485,30 +485,53 @@ class AdminPanel(QWidget):
 
     def _dashboard_yenile(self):
         rows = sorgu_calistir("""
-            SELECT (SELECT COUNT(*) FROM uyeler),
-                   (SELECT COUNT(*) FROM uyeler WHERE durum='aktif'),
-                   (SELECT IFNULL(SUM(tutar),0) FROM odemeler
-                    WHERE MONTH(odeme_tarihi)=MONTH(NOW()) AND YEAR(odeme_tarihi)=YEAR(NOW())),
-                   (SELECT COUNT(*) FROM antrenorler)
+            SELECT 
+                (SELECT COUNT(*) FROM uyeler),
+                (SELECT COUNT(*) FROM uyeler WHERE durum='aktif'),
+                (SELECT IFNULL(SUM(tutar),0) FROM odemeler
+                WHERE strftime('%m', odeme_tarihi) = strftime('%m', 'now')
+                AND strftime('%Y', odeme_tarihi) = strftime('%Y', 'now')),
+                (SELECT COUNT(*) FROM antrenorler)
         """)
+
         toplam, aktif, gelir, ant = rows[0] if rows else (0, 0, 0, 0)
+
         self.cp.guncelle(aktif)
         self.dash_kart1.guncelle(toplam)
         self.dash_kart2.guncelle(f"{float(gelir):,.0f}")
         self.dash_kart3.guncelle(ant)
+
         rows2 = sorgu_calistir("""
-            SELECT u.ad, u.soyad, u.telefon, ut.tip_adi, u.uyelik_baslangic
-            FROM uyeler u LEFT JOIN uyelik_tipleri ut ON u.uyelik_tip_id=ut.uyelik_tip_id
-            ORDER BY u.kayit_tarihi DESC LIMIT 10
+            SELECT 
+                u.ad, 
+                u.soyad, 
+                u.telefon, 
+                ut.tip_adi, 
+                u.uyelik_baslangic
+            FROM uyeler u 
+            LEFT JOIN uyelik_tipleri ut 
+                ON u.uyelik_tip_id = ut.uyelik_tip_id
+            ORDER BY u.kayit_tarihi DESC 
+            LIMIT 10
         """)
+
         tabloyu_doldur(self.dash_tablo, rows2)
 
     # ÜYELER
     def _uyeler_yenile(self):
         rows = sorgu_calistir("""
-            SELECT u.uye_id, u.ad, u.soyad, u.telefon, u.email,
-                   ut.tip_adi, u.uyelik_bitis, u.durum
-            FROM uyeler u LEFT JOIN uyelik_tipleri ut ON u.uyelik_tip_id=ut.uyelik_tip_id
+            SELECT 
+                u.uye_id, 
+                u.ad, 
+                u.soyad, 
+                u.telefon, 
+                u.email,
+                ut.tip_adi, 
+                u.uyelik_bitis, 
+                u.durum
+            FROM uyeler u 
+            LEFT JOIN uyelik_tipleri ut 
+                ON u.uyelik_tip_id = ut.uyelik_tip_id
             ORDER BY u.uye_id DESC
         """)
         tabloyu_doldur(self.uye_tablo, rows, renkli_sutun=7)
@@ -516,7 +539,9 @@ class AdminPanel(QWidget):
     def _uye_ekle(self):
         from uye_form import UyeForm
         f = UyeForm(parent=self)
-        if f.exec_(): self._uyeler_yenile()
+        if f.exec_(): 
+            self._uyeler_yenile() 
+            self._grafikleri_yenile()
 
     def _uye_duzenle(self):
         sel = self.uye_tablo.selectedItems()
@@ -536,54 +561,80 @@ class AdminPanel(QWidget):
     def _uye_sil(self):
         sel = self.uye_tablo.selectedItems()
         if not sel:
-            siber_mesaj("Seçim Eksik", "Silmek için lütfen tablodan bir üye seçin.", "uyari", self)
-            return  # ← return if bloğunun İÇİNDE olmalı
-        
-        secili_satir = sel[0].row()
-        uid = self.uye_tablo.item(secili_satir, 0).text()
-        ad  = self.uye_tablo.item(secili_satir, 1).text()
-        
-        if siber_mesaj("Üye Silme Onayı", f"{ad} isimli üyeyi ve sistemdeki tüm kayıtlarını silmek istiyor musunuz?", "soru", self):
+            siber_mesaj("Seçim Eksik", "Silmek için bir üye seçin.", "uyari", self)
+            return
+
+        row = sel[0].row()
+        uid = self.uye_tablo.item(row, 0).text()
+        ad = self.uye_tablo.item(row, 1).text()
+
+        if siber_mesaj(
+            "Üye Silme Onayı",
+            f"{ad} isimli üyeyi silmek istiyor musunuz?",
+            "soru",
+            self
+        ):
             try:
                 bag = db_baglanti.baglan()
                 cur = bag.cursor()
-                cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-                cur.execute("DELETE FROM uyeler WHERE uye_id = %s", (uid,))
-                cur.execute("SET FOREIGN_KEY_CHECKS = 1")
+
+                # ❌ FOREIGN_KEY_CHECKS YOK (SQLite)
+                cur.execute("DELETE FROM uyeler WHERE uye_id = ?", (uid,))
+
                 bag.commit()
                 db_baglanti.baglanti_kapat(bag, cur)
-                self.uye_tablo.removeRow(secili_satir)
-                ToastNotification(self, f"{ad} başarıyla silindi.", "basari").goster()
-                if hasattr(self, '_dashboard_yenile'):
+
+                self.uye_tablo.removeRow(row)
+
+                ToastNotification(self, f"{ad} silindi", "basari").goster()
+
+                if hasattr(self, "_dashboard_yenile"):
                     self._dashboard_yenile()
+
             except Exception as e:
-                try:
-                    bag2 = db_baglanti.baglan()
-                    cur2 = bag2.cursor()
-                    cur2.execute("SET FOREIGN_KEY_CHECKS = 1")
-                    bag2.commit()
-                    db_baglanti.baglanti_kapat(bag2, cur2)
-                except:
-                    pass
-                siber_mesaj("Sistem Hatası", f"Veritabanı hatası oluştu:\n{e}", "hata", self)
+                siber_mesaj("Sistem Hatası", str(e), "hata", self)
 
     def _uyeler(self):
         w, lay = self._sayfa_widget("👥  Üye Yönetimi")
+
         lay.addWidget(aksiyon_bar_olustur([
-            ("➕  Yeni Üye Ekle", "btnBasari",  self._uye_ekle),
-            ("✏️  Düzenle",       "",           self._uye_duzenle),
-            ("🗑️  Sil",           "btnTehlike", self._uye_sil),
+            ("➕  Yeni Üye Ekle", "btnBasari", self._uye_ekle),
+            ("✏️  Düzenle", "", self._uye_duzenle),
+            ("🗑️  Sil", "btnTehlike", self._uye_sil),
         ]))
-        self.uye_tablo = tablo_olustur(["ID","Ad","Soyad","Telefon","E-posta","Üyelik","Bitiş","Durum"])
+
+        self.uye_tablo = tablo_olustur([
+            "ID",
+            "Ad",
+            "Soyad",
+            "Telefon",
+            "E-posta",
+            "Üyelik",
+            "Bitiş",
+            "Durum"
+        ])
+
+        # tabloyu ilk yükleme
         self._uyeler_yenile()
+
         lay.addWidget(self.uye_tablo)
+
         return w
 
     # ANTRENÖRLER
     def _antrenorler_yenile(self):
-        rows = sorgu_calistir(
-            "SELECT antrenor_id,ad,soyad,uzmanlik,telefon,email,maas FROM antrenorler ORDER BY antrenor_id DESC"
-        )
+        rows = sorgu_calistir("""
+            SELECT 
+                antrenor_id,
+                ad,
+                soyad,
+                uzmanlik,
+                telefon,
+                email,
+                maas
+            FROM antrenorler
+            ORDER BY antrenor_id DESC
+        """)
         tabloyu_doldur(self.ant_tablo, rows)
 
     def _ant_ekle(self):
@@ -593,71 +644,97 @@ class AdminPanel(QWidget):
 
     def _ant_duzenle(self):
         sel = self.ant_tablo.selectedItems()
-        # Siberpunk Seçim Koruması
         if not sel:
-            siber_mesaj("Seçim Eksik", "Düzenlemek için lütfen tablodan bir antrenör seçin.", "uyari", self)
+            siber_mesaj("Seçim Eksik", "Lütfen antrenör seçin.", "uyari", self)
             return
-            
+
         aid = int(self.ant_tablo.item(sel[0].row(), 0).text())
+
         from antrenor_form import AntrenorForm
         f = AntrenorForm(antrenor_id=aid, parent=self)
-        if f.exec_(): self._antrenorler_yenile()
+
+        if f.exec_():
+            self._antrenorler_yenile()
 
     def _ant_sil(self):
         sel = self.ant_tablo.selectedItems()
         if not sel:
-            siber_mesaj("Seçim Eksik", "Silmek için lütfen tablodan bir antrenör seçin.", "uyari", self)
-            return  # ← return if bloğunun İÇİNDE olmalı
-        
-        secili_satir = sel[0].row()
-        aid = self.ant_tablo.item(secili_satir, 0).text()
-        ad  = self.ant_tablo.item(secili_satir, 1).text()
-        
-        if siber_mesaj("Antrenör Silme Onayı", f"{ad} isimli antrenörü silmek istiyor musunuz?", "soru", self):
+            siber_mesaj("Seçim Eksik", "Silmek için antrenör seçin.", "uyari", self)
+            return
+
+        row = sel[0].row()
+        aid = self.ant_tablo.item(row, 0).text()
+        ad = self.ant_tablo.item(row, 1).text()
+
+        if siber_mesaj(
+            "Antrenör Silme Onayı",
+            f"{ad} isimli antrenörü silmek istiyor musunuz?",
+            "soru",
+            self
+        ):
             try:
                 bag = db_baglanti.baglan()
                 cur = bag.cursor()
-                cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-                cur.execute("DELETE FROM antrenorler WHERE antrenor_id = %s", (aid,))
-                cur.execute("SET FOREIGN_KEY_CHECKS = 1")
+
+                # ❌ SQLite'ta FOREIGN_KEY_CHECKS YOK
+                cur.execute(
+                    "DELETE FROM antrenorler WHERE antrenor_id = ?",
+                    (aid,)
+                )
+
                 bag.commit()
                 db_baglanti.baglanti_kapat(bag, cur)
-                self.ant_tablo.removeRow(secili_satir)
-                ToastNotification(self, f"{ad} başarıyla silindi.", "basari").goster()
-                if hasattr(self, '_dashboard_yenile'):
+
+                self.ant_tablo.removeRow(row)
+
+                ToastNotification(self, f"{ad} silindi.", "basari").goster()
+
+                if hasattr(self, "_dashboard_yenile"):
                     self._dashboard_yenile()
+
             except Exception as e:
-                try:
-                    bag2 = db_baglanti.baglan()
-                    cur2 = bag2.cursor()
-                    cur2.execute("SET FOREIGN_KEY_CHECKS = 1")
-                    bag2.commit()
-                    db_baglanti.baglanti_kapat(bag2, cur2)
-                except:
-                    pass
-                siber_mesaj("Sistem Hatası", f"Veritabanı hatası oluştu:\n{e}", "hata", self)
+                siber_mesaj("Sistem Hatası", str(e), "hata", self)
 
     def _antrenorler(self):
         w, lay = self._sayfa_widget("🏋 Antrenör Yönetimi")
+
         lay.addWidget(aksiyon_bar_olustur([
-            ("➕ Yeni Antrenör Ekle", "btnBasari",  self._ant_ekle),
-            ("✏️ Düzenle",            "",           self._ant_duzenle),
-            ("🗑️ Sil",               "btnTehlike", self._ant_sil),
+            ("➕ Yeni Antrenör Ekle", "btnBasari", self._ant_ekle),
+            ("✏️ Düzenle", "", self._ant_duzenle),
+            ("🗑️ Sil", "btnTehlike", self._ant_sil),
         ]))
-        self.ant_tablo = tablo_olustur(["ID","Ad","Soyad","Uzmanlık","Telefon","E-posta","Maaş (₺)"])
+
+        self.ant_tablo = tablo_olustur([
+            "ID",
+            "Ad",
+            "Soyad",
+            "Uzmanlık",
+            "Telefon",
+            "E-posta",
+            "Maaş (₺)"
+        ])
+
         self._antrenorler_yenile()
         lay.addWidget(self.ant_tablo)
+
         return w
 
     # DERSLER
     def _dersler_yenile(self):
         rows = sorgu_calistir("""
-            SELECT d.ders_id, d.ders_adi, CONCAT(a.ad,' ',a.soyad), d.ders_saati, d.kapasite, d.salon
-            FROM dersler d LEFT JOIN antrenorler a ON d.antrenor_id=a.antrenor_id
+            SELECT 
+                d.ders_id,
+                d.ders_adi,
+                a.ad || ' ' || a.soyad,
+                d.ders_saati,
+                d.kapasite,
+                d.salon
+            FROM dersler d
+            LEFT JOIN antrenorler a 
+                ON d.antrenor_id = a.antrenor_id
             ORDER BY d.ders_id DESC
         """)
         tabloyu_doldur(self.ders_tablo, rows)
-
     def _ders_ekle(self):
         from ders_form import DersForm
         f = DersForm(parent=self)
@@ -678,58 +755,78 @@ class AdminPanel(QWidget):
     def _ders_sil(self):
         sel = self.ders_tablo.selectedItems()
         if not sel:
-            siber_mesaj("Seçim Eksik", "Silmek için lütfen tablodan bir ders seçin.", "uyari", self)
-            return  # ← return if bloğunun İÇİNDE olmalı
-        
-        secili_satir = sel[0].row()
-        did = self.ders_tablo.item(secili_satir, 0).text()
-        ad  = self.ders_tablo.item(secili_satir, 1).text()
-        
-        if siber_mesaj("Ders Silme Onayı", f"{ad} dersini silmek istiyor musunuz?", "soru", self):
+            siber_mesaj("Seçim Eksik", "Silmek için ders seçin.", "uyari", self)
+            return
+
+        row = sel[0].row()
+        did = self.ders_tablo.item(row, 0).text()
+        ad = self.ders_tablo.item(row, 1).text()
+
+        if siber_mesaj(
+            "Ders Silme Onayı",
+            f"{ad} dersini silmek istiyor musunuz?",
+            "soru",
+            self
+        ):
             try:
                 bag = db_baglanti.baglan()
                 cur = bag.cursor()
-                cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-                cur.execute("DELETE FROM dersler WHERE ders_id = %s", (did,))
-                cur.execute("SET FOREIGN_KEY_CHECKS = 1")
+
+                # ❌ SQLite'ta FOREIGN_KEY_CHECKS YOK
+                cur.execute(
+                    "DELETE FROM dersler WHERE ders_id = ?",
+                    (did,)
+                )
+
                 bag.commit()
                 db_baglanti.baglanti_kapat(bag, cur)
-                self.ders_tablo.removeRow(secili_satir)
-                ToastNotification(self, f"{ad} dersi başarıyla silindi.", "basari").goster()
+
+                self.ders_tablo.removeRow(row)
+
+                ToastNotification(self, f"{ad} silindi.", "basari").goster()
+
             except Exception as e:
-                try:
-                    bag2 = db_baglanti.baglan()
-                    cur2 = bag2.cursor()
-                    cur2.execute("SET FOREIGN_KEY_CHECKS = 1")
-                    bag2.commit()
-                    db_baglanti.baglanti_kapat(bag2, cur2)
-                except:
-                    pass
-                siber_mesaj("Sistem Hatası", f"Veritabanı hatası oluştu:\n{e}", "hata", self)
+                siber_mesaj("Sistem Hatası", str(e), "hata", self)
 
     def _dersler(self):
         w, lay = self._sayfa_widget("📅 Ders Programı")
+
         lay.addWidget(aksiyon_bar_olustur([
-            ("➕ Yeni Ders Ekle", "btnBasari",  self._ders_ekle),
-            ("✏️ Düzenle",        "",           self._ders_duzenle),
-            ("🗑️ Sil",            "btnTehlike", self._ders_sil),
+            ("➕ Yeni Ders Ekle", "btnBasari", self._ders_ekle),
+            ("✏️ Düzenle", "", self._ders_duzenle),
+            ("🗑️ Sil", "btnTehlike", self._ders_sil),
         ]))
-        self.ders_tablo = tablo_olustur(["ID","Ders Adı","Antrenör","Saat","Kapasite","Salon"])
+
+        self.ders_tablo = tablo_olustur([
+            "ID",
+            "Ders Adı",
+            "Antrenör",
+            "Saat",
+            "Kapasite",
+            "Salon"
+        ])
+
         self._dersler_yenile()
         lay.addWidget(self.ders_tablo)
+
         return w
 
     # ÖDEMELER
     def _odemeler_yenile(self):
-     rows = sorgu_calistir("""
-        SELECT CONCAT(u.ad,' ',u.soyad), oy.yontem_adi, o.tutar, o.odeme_tarihi, o.aciklama
-        FROM odemeler o
-        LEFT JOIN uyeler u ON o.uye_id = u.uye_id
-        LEFT JOIN odeme_yontemleri oy ON o.odeme_yontem_id = oy.odeme_yontem_id
-        WHERE u.uye_id IS NOT NULL
-        ORDER BY o.odeme_id DESC
+        rows = sorgu_calistir("""
+            SELECT 
+                u.ad || ' ' || u.soyad,
+                oy.yontem_adi,
+                o.tutar,
+                o.odeme_tarihi,
+                o.aciklama
+            FROM odemeler o
+            LEFT JOIN uyeler u ON o.uye_id = u.uye_id
+            LEFT JOIN odeme_yontemleri oy ON o.odeme_yontem_id = oy.odeme_yontem_id
+            WHERE u.uye_id IS NOT NULL
+            ORDER BY o.odeme_id DESC
         """)
-     tabloyu_doldur(self.odeme_tablo, rows)
+        tabloyu_doldur(self.odeme_tablo, rows)
 
     def _odeme_al(self):
         from odeme_form import OdemeForm
@@ -737,6 +834,7 @@ class AdminPanel(QWidget):
         if f.exec_():
             self._odemeler_yenile()
             self._kasa_yenile()
+            self._grafikleri_yenile()
 
     def _odemeler(self):
         w, lay = self._sayfa_widget("💰  Ödeme Kayıtları")
@@ -749,45 +847,158 @@ class AdminPanel(QWidget):
         return w
 
     # EKİPMANLAR
+    def _ekipman_ekle(self):
+        from ekipman_form import EkipmanForm
+        if EkipmanForm(parent=self).exec_(): self._ekipmanlar_yenile()
+
+    def _ekipman_duzenle(self):
+        sel = self.ekipman_tablo.selectedItems()
+        if not sel: return
+        # Tablodan ID al ve formu aç (Ekipman tablonuzda ID kolonunun olduğunu varsayıyorum)
+        eid = self.ekipman_tablo.item(sel[0].row(), 0).text() 
+        from ekipman_form import EkipmanForm
+        if EkipmanForm(ekipman_id=eid, parent=self).exec_(): self._ekipmanlar_yenile()
+
     def _ekipmanlar(self):
         w, lay = self._sayfa_widget("🔧  Ekipman Yönetimi")
-        t = tablo_olustur(["Ekipman","Tür","Adet","Durum","Alım Tarihi"])
-        rows = sorgu_calistir("""
-            SELECT e.ekipman_adi, et.tur_adi, e.adet, e.durum, e.alim_tarihi
-            FROM ekipmanlar e LEFT JOIN ekipman_turleri et ON e.ekipman_tur_id=et.ekipman_tur_id
-        """)
-        tabloyu_doldur(t, rows, renkli_sutun=3)
-        lay.addWidget(t)
+        
+        # İşlem butonlarını ekleyin (güncellenmiş fonksiyon isimleri ile)
+        lay.addWidget(aksiyon_bar_olustur([
+            ("➕ Ekle", "btnBasari", self._ekipman_ekle),
+            ("✏️ Düzenle", "", self._ekipman_duzenle),
+            ("🗑️ Sil", "btnTehlike", self._ekipman_sil), # Silme fonksiyonu da eklenmeli
+        ]))
+
+        # Tabloyu self.ekipman_tablo olarak tanımlayın
+        self.ekipman_tablo = tablo_olustur([
+            "ID",
+            "Ekipman",
+            "Tür",
+            "Adet",
+            "Durum",
+            "Alım Tarihi"
+        ])
+
+        # Veriyi yükle
+        self._ekipmanlar_yenile()
+        
+        lay.addWidget(self.ekipman_tablo)
         return w
+    def _ekipman_sil(self):
+        sel = self.ekipman_tablo.selectedItems()
+        if not sel:
+            siber_mesaj("Seçim Eksik", "Silmek için bir ekipman seçin.", "uyari", self)
+            return
+
+        row = sel[0].row()
+        eid = self.ekipman_tablo.item(row, 0).text() # ID sütununun 0. indeks olduğunu varsayıyorum
+        ad = self.ekipman_tablo.item(row, 1).text()
+
+        if siber_mesaj("Silme Onayı", f"{ad} ekipmanını silmek istiyor musunuz?", "soru", self):
+            try:
+                bag = db_baglanti.baglan()
+                cur = bag.cursor()
+                cur.execute("DELETE FROM ekipmanlar WHERE ekipman_id = ?", (eid,))
+                bag.commit()
+                db_baglanti.baglanti_kapat(bag, cur)
+                
+                self.ekipman_tablo.removeRow(row)
+                ToastNotification(self, f"{ad} silindi.", "basari").goster()
+            except Exception as e:
+                siber_mesaj("Sistem Hatası", str(e), "hata", self)
+    def _ekipmanlar_yenile(self):
+        # SQL sorgunuzda ID'yi de çektiğinizden emin olun
+        rows = sorgu_calistir("""
+            SELECT 
+                e.ekipman_id,
+                e.ekipman_adi,
+                et.tur_adi,
+                e.adet,
+                e.durum,
+                e.alim_tarihi
+            FROM ekipmanlar e
+            LEFT JOIN ekipman_turleri et 
+                ON e.ekipman_tur_id = et.ekipman_tur_id
+        """)
+        
+        # Tablonun tanımlı olduğunu kontrol edin
+        if hasattr(self, 'ekipman_tablo'):
+            tabloyu_doldur(self.ekipman_tablo, rows, renkli_sutun=4) # Durum sütunu 4. indekste
 
     # STOKLAR
+
+    
+    def _stok_ekle(self):
+        from stok_form import StokForm
+        if StokForm(parent=self).exec_(): self._stoklar_yenile()
+
+    def _stok_duzenle(self):
+        sel = self.stok_tablo.selectedItems()
+        if not sel: return
+        # Tablodaki 0. sütun ID'yi içeriyorsa, bu ID'nin veritabanındaki karşılığı neyse onu kullanın
+        sid = self.stok_tablo.item(sel[0].row(), 0).text()
+        from stok_form import StokForm
+        if StokForm(urun_id=sid, parent=self).exec_(): self._stoklar_yenile()
+
     def _stoklar(self):
         w, lay = self._sayfa_widget("📦  Stok Takibi")
-        t = tablo_olustur(["Ürün Adı","Miktar","Birim","Son Güncelleme"])
-        rows = sorgu_calistir("SELECT urun_adi,miktar,birim,son_guncelleme FROM stoklar ORDER BY urun_adi")
-        tabloyu_doldur(t, rows)
-        lay.addWidget(t)
+        
+        lay.addWidget(aksiyon_bar_olustur([
+            ("➕ Ekle", "btnBasari", self._stok_ekle),
+            ("✏️ Düzenle", "", self._stok_duzenle),
+        ]))
+
+        self.stok_tablo = tablo_olustur(["ID", "Ürün Adı", "Miktar", "Birim", "Son Güncelleme"])
+        self._stoklar_yenile()
+        lay.addWidget(self.stok_tablo)
         return w
+
+    def _stoklar_yenile(self):
+    # 'stok_id' sütununu mutlaka sorguya ekleyin
+        rows = sorgu_calistir("SELECT stok_id, urun_adi, miktar, birim, son_guncelleme FROM stoklar")
+        # Tabloyu doldururken ID'nin 0. indekste olması lazım
+        tabloyu_doldur(self.stok_tablo, rows)
 
     # KASA
     def _kasa_yenile(self):
-        if not hasattr(self, 'kart_gelir'): return
-        ozet = sorgu_calistir("SELECT islem_tipi, SUM(tutar) FROM kasa GROUP BY islem_tipi")
-        gelir_top = gider_top = 0
-        for tip, toplam in ozet:
-            if tip == "gelir": gelir_top = float(toplam)
-            else: gider_top = float(toplam)
+        if not hasattr(self, 'kart_gelir'):
+            return
+
+        ozet = sorgu_calistir("""
+            SELECT islem_tipi, SUM(tutar)
+            FROM kasa
+            GROUP BY islem_tipi
+        """)
+
+        gelir_top = 0
+        gider_top = 0
+
+        if ozet:
+            for tip, toplam in ozet:
+                if tip == "gelir":
+                    gelir_top = float(toplam or 0)
+                else:
+                    gider_top = float(toplam or 0)
+
         net = gelir_top - gider_top
+
         self.kart_gelir.guncelle(f"{gelir_top:,.0f}")
         self.kart_gider.guncelle(f"{gider_top:,.0f}")
         self.kart_net.guncelle(f"{net:,.0f}")
-        rows = sorgu_calistir("SELECT gider_turu,tutar,gider_tarihi,aciklama FROM giderler ORDER BY gider_id DESC")
-        tabloyu_doldur(self.gider_tablo, rows)
 
+        rows = sorgu_calistir("""
+            SELECT gider_turu, tutar, gider_tarihi, aciklama
+            FROM giderler
+            ORDER BY gider_id DESC
+        """)
+
+        tabloyu_doldur(self.gider_tablo, rows)
     def _gider_ekle(self):
         from gider_form import GiderForm
         f = GiderForm(parent=self)
-        if f.exec_(): self._kasa_yenile()
+        if f.exec_():
+            self._kasa_yenile()
+            self._grafikleri_yenile()
 
     def _kasa(self):
         w, lay = self._sayfa_widget("💼  Kasa & Giderler")
@@ -811,6 +1022,7 @@ class AdminPanel(QWidget):
         bilgi.setStyleSheet("color:#555580; font-size:12px; background:transparent; border:none;")
         lay.addWidget(bilgi)
 
+        # Rapor butonları
         bg = QGridLayout(); bg.setSpacing(12)
         def rapor_btn(baslik, ikon, tablo):
             btn = QPushButton(f"{ikon}  {baslik}")
@@ -819,34 +1031,57 @@ class AdminPanel(QWidget):
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(lambda: self._csv_disa_aktar(tablo, baslik))
             return btn
+            
         bg.addWidget(rapor_btn("Üyeler Listesi",   "👥", "uyeler"),      0, 0)
         bg.addWidget(rapor_btn("Ödeme Geçmişi",    "💰", "odemeler"),    0, 1)
         bg.addWidget(rapor_btn("Kasa ve Giderler", "💼", "giderler"),    1, 0)
         bg.addWidget(rapor_btn("Antrenör Listesi", "🏋", "antrenorler"), 1, 1)
         lay.addLayout(bg)
 
-        gl = QHBoxLayout(); gl.setSpacing(16)
+        # Grafiklerin ana yuvası
+        self.grafik_layout = QHBoxLayout()
+        self.grafik_layout.setSpacing(16)
+        
+        # İlk çizimi yap
+        self._grafikleri_yenile()
+        
+        lay.addLayout(self.grafik_layout)
+        lay.addStretch()
+        return w
 
+    def _grafikleri_yenile(self):
+        """Grafikleri temizleyip yeniden çizen fonksiyon."""
+        # Eski widget'ları temizle
+        while self.grafik_layout.count():
+            item = self.grafik_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # 1. Kasa Grafiği
         fig1 = Figure(figsize=(4.5, 3), facecolor="#08081E")
         c1 = FigureCanvas(fig1)
         ax1 = fig1.add_subplot(111)
         ax1.set_facecolor("#08081E")
         ax1.tick_params(colors="#7B7BAA", labelsize=9)
         for s in ax1.spines.values(): s.set_color("#1E1E4A")
+        
         kasa = sorgu_calistir("SELECT islem_tipi, SUM(tutar) FROM kasa GROUP BY islem_tipi")
         gelir = gider = 0
         for tip, tutar in kasa:
-            if tip == "gelir": gelir = tutar
-            else: gider = tutar
+            if tip == "gelir": gelir = float(tutar or 0)
+            else: gider = float(tutar or 0)
+            
         ax1.bar(["Gelir","Gider"], [gelir, gider], color=["#8B5CF6","#3B82F6"], width=0.5, edgecolor="none")
         ax1.set_title("Kasa Özeti (₺)", color="#A78BFA", pad=10, fontsize=11, weight="bold")
         fig1.tight_layout()
         c1.setStyleSheet("border:1px solid #1E1E4A; border-radius:8px;")
 
+        # 2. Üyelik Grafiği
         fig2 = Figure(figsize=(4.5, 3), facecolor="#08081E")
         c2 = FigureCanvas(fig2)
         ax2 = fig2.add_subplot(111)
         ax2.set_facecolor("#08081E")
+        
         uye_data = sorgu_calistir("""
             SELECT ut.tip_adi, COUNT(u.uye_id)
             FROM uyeler u JOIN uyelik_tipleri ut ON u.uyelik_tip_id=ut.uyelik_tip_id
@@ -863,10 +1098,8 @@ class AdminPanel(QWidget):
         fig2.tight_layout()
         c2.setStyleSheet("border:1px solid #1E1E4A; border-radius:8px;")
 
-        gl.addWidget(c1); gl.addWidget(c2)
-        lay.addLayout(gl)
-        lay.addStretch()
-        return w
+        self.grafik_layout.addWidget(c1)
+        self.grafik_layout.addWidget(c2)
 
     def _csv_disa_aktar(self, tablo_adi, dosya_baslik):
         dosya_yolu, _ = QFileDialog.getSaveFileName(

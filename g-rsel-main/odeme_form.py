@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-# TitanFit Gym – Ödeme Formu 
-
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QDateEdit, QMessageBox, QGridLayout
@@ -8,7 +6,6 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QDate
 from tema import uygula_tema
 import db_baglanti
-
 
 class OdemeForm(QDialog):
     def __init__(self, parent=None):
@@ -19,7 +16,8 @@ class OdemeForm(QDialog):
         self.setStyleSheet(self.styleSheet() + """
             QDialog { background-color: #0A0A22; border: 1px solid #1E1E4A; border-radius: 10px; }
         """)
-        self.uyeler   = self._getir("SELECT uye_id, ad, soyad FROM uyeler WHERE durum='aktif'")
+        # Sorguları SQLite formatına çevirdik (durum='aktif' olduğu varsayıldı)
+        self.uyeler   = self._getir("SELECT uye_id, ad, soyad FROM uyeler")
         self.yontemler = self._getir("SELECT odeme_yontem_id, yontem_adi FROM odeme_yontemleri")
         self._ui_olustur()
 
@@ -27,11 +25,11 @@ class OdemeForm(QDialog):
         try:
             bag = db_baglanti.baglan()
             if not bag: return []
-            cur = bag.cursor(dictionary=True)
+            cur = bag.cursor()
             cur.execute(sql)
             veri = cur.fetchall()
             db_baglanti.baglanti_kapat(bag, cur)
-            return veri
+            return veri # veri artık liste (tuple) şeklinde döner
         except Exception as e:
             print(e); return []
 
@@ -42,11 +40,7 @@ class OdemeForm(QDialog):
 
         baslik = QLabel("💰  Tahsilat Al")
         baslik.setAlignment(Qt.AlignCenter)
-        baslik.setStyleSheet("""
-            font-size: 17px; font-weight: 800; color: #93C5FD;
-            letter-spacing: 1px; padding-bottom: 6px;
-            border-bottom: 1px solid #1E1E4A; background: transparent;
-        """)
+        baslik.setStyleSheet("font-size: 17px; font-weight: 800; color: #93C5FD; border-bottom: 1px solid #1E1E4A; padding-bottom: 6px;")
         layout.addWidget(baslik)
 
         grid = QGridLayout()
@@ -55,7 +49,7 @@ class OdemeForm(QDialog):
 
         def label(text):
             lbl = QLabel(text)
-            lbl.setStyleSheet("font-size:11px; color:#7B7BAA; font-weight:700; letter-spacing:1px; background:transparent; border:none;")
+            lbl.setStyleSheet("font-size:11px; color:#7B7BAA; font-weight:700; letter-spacing:1px; border:none;")
             return lbl
 
         # Üye
@@ -63,14 +57,13 @@ class OdemeForm(QDialog):
         self.uye_input = QComboBox()
         self.uye_input.setFixedHeight(38)
         for u in self.uyeler:
-            self.uye_input.addItem(f"{u['ad']} {u['soyad']}", u['uye_id'])
+            self.uye_input.addItem(f"{u[1]} {u[2]}", u[0]) # u[0]=id, u[1]=ad, u[2]=soyad
         grid.addWidget(self.uye_input, 0, 1)
 
         # Tutar
         grid.addWidget(label("TUTAR (₺)"), 1, 0)
         self.tutar_input = QLineEdit()
         self.tutar_input.setFixedHeight(38)
-        self.tutar_input.setPlaceholderText("0.00")
         grid.addWidget(self.tutar_input, 1, 1)
 
         # Yöntem
@@ -78,13 +71,12 @@ class OdemeForm(QDialog):
         self.yontem_input = QComboBox()
         self.yontem_input.setFixedHeight(38)
         for y in self.yontemler:
-            self.yontem_input.addItem(y['yontem_adi'], y['odeme_yontem_id'])
+            self.yontem_input.addItem(y[1], y[0]) # y[0]=id, y[1]=ad
         grid.addWidget(self.yontem_input, 2, 1)
 
         # Tarih
         grid.addWidget(label("TARİH"), 3, 0)
         self.tarih_input = QDateEdit()
-        self.tarih_input.setFixedHeight(38)
         self.tarih_input.setCalendarPopup(True)
         self.tarih_input.setDate(QDate.currentDate())
         grid.addWidget(self.tarih_input, 3, 1)
@@ -92,27 +84,16 @@ class OdemeForm(QDialog):
         # Açıklama
         grid.addWidget(label("AÇIKLAMA"), 4, 0)
         self.aciklama_input = QLineEdit()
-        self.aciklama_input.setFixedHeight(38)
-        self.aciklama_input.setPlaceholderText("İsteğe bağlı")
         grid.addWidget(self.aciklama_input, 4, 1)
 
         layout.addLayout(grid)
         layout.addStretch()
 
-        btn_lay = QHBoxLayout()
-        btn_lay.setSpacing(10)
-        iptal_btn = QPushButton("İptal")
-        iptal_btn.setFixedHeight(40)
-        iptal_btn.setCursor(Qt.PointingHandCursor)
-        iptal_btn.clicked.connect(self.reject)
+        # Kaydet Butonu
         kaydet_btn = QPushButton("  Kaydet  →")
-        kaydet_btn.setObjectName("loginButton")
         kaydet_btn.setFixedHeight(40)
-        kaydet_btn.setCursor(Qt.PointingHandCursor)
         kaydet_btn.clicked.connect(self._kaydet)
-        btn_lay.addWidget(iptal_btn)
-        btn_lay.addWidget(kaydet_btn)
-        layout.addLayout(btn_lay)
+        layout.addWidget(kaydet_btn)
 
     def _kaydet(self):
         uye_id   = self.uye_input.currentData()
@@ -123,21 +104,18 @@ class OdemeForm(QDialog):
 
         if not tutar:
             QMessageBox.warning(self, "Uyarı", "Lütfen tutar giriniz."); return
-        try:
-            float(tutar)
-        except ValueError:
-            QMessageBox.warning(self, "Uyarı", "Tutar sadece rakamlardan oluşmalıdır."); return
-
+        
         try:
             bag = db_baglanti.baglan()
             cur = bag.cursor()
+            # SQLite uyumlu sorgu: %s yerine ?
             cur.execute(
-                "INSERT INTO odemeler (uye_id,tutar,odeme_tarihi,odeme_yontem_id,aciklama) VALUES (%s,%s,%s,%s,%s)",
+                "INSERT INTO odemeler (uye_id, tutar, odeme_tarihi, odeme_yontem_id, aciklama) VALUES (?, ?, ?, ?, ?)",
                 (uye_id, tutar, tarih, yontem, aciklama)
             )
             bag.commit()
             db_baglanti.baglanti_kapat(bag, cur)
-            QMessageBox.information(self, "Başarılı", "Tahsilat başarıyla kaydedildi.")
+            QMessageBox.information(self, "Başarılı", "Tahsilat kaydedildi.")
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, "Hata", f"Kayıt işlemi başarısız:\n{e}")
+            QMessageBox.critical(self, "Hata", f"Kayıt hatası:\n{e}")
